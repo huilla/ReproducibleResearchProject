@@ -1,0 +1,207 @@
+---
+title: "Tornadoes and Floods - The Most Severe Weather Events in the United States 2002-2011"
+author: "Julia"
+date: "`r Sys.Date()`"
+output: html_document
+---
+
+## 1 Synopsis
+
+Storms and other severe weather events can cause both public health and economic problems for communities and municipalities. This assignment is part of a Coursera course Reproducible Research. The goal of the assignment is to explore  the U.S. National Oceanic and Atmospheric Administration's (NOAA) storm database and find out which types of events 1) are most harmful with respect to population health and 2) have the greatest economic consequences across the United States. Data between 2002 and 2011 was chosen for the analysis. Result 1: Tornadoes, heat and thunderstorms were the most harmful weather event with respect to population health. Tornadoes caused more than 1100 deaths and almost 13600 injuries. Result 2: Floods, hurricanes and storm surges had the greatest economic consequences. Floods alone caused almost 150 billion dollars' worth of damage.
+
+## 2 Data Processing
+
+### Data Loading
+
+The data for this assignment come in the form of a comma-separated-value file compressed via the bzip2 algorithm to reduce its size. The file can be downloaded from the course [web site.](https://d396qusza40orc.cloudfront.net/repdata%2Fdata%2FStormData.csv.bz2) Related documentation can be found in [Storm Data Documentation.](https://d396qusza40orc.cloudfront.net/repdata%2Fpeer2_doc%2Fpd01016005curr.pdf)
+
+Load needed packages:
+
+```{r}
+# If not already installed, install the required packages with install.packages()
+library(dplyr)
+library(ggplot2)
+library(tidyr)
+```
+
+Load and read data:
+
+```{r}
+url <- "https://d396qusza40orc.cloudfront.net/repdata%2Fdata%2FStormData.csv.bz2"
+download.file(url, destfile = "stormdata.csv.bz2", method = "curl")
+rawdata <- read.csv('StormData.csv.bz2', header = TRUE, stringsAsFactors = FALSE)
+```
+
+Take a quick look at the data:
+
+```{r}
+str(rawdata)
+```
+
+Ouch, not that tidy. So we have a data frame with 902297 observations and 37 variables and some preprocessing to do.
+
+### Data Selection
+
+Let's first select only the variables that are needed for the analysis. These are:  
+- BGN_DATE: needs to be converted to date class  
+- EVTYPE: type of event
+- FATALITIES: number of fatalities  
+- INDURIES: number of injuries  
+- PROPDMG: property damage in numbers without magnitude  
+- PROPDMGEXP: a character used to signify magnitude for property damage e.g. “M” for millions  
+- CROPDMG: crop damage in numbers without magnitude  
+- CROPDMGEXP: a character used to signify magnitude for crop damage e.g. "K" for thousands
+
+Create a new data frame with only selected variables:
+
+```{r}
+stormdata <- rawdata %>%
+  select(BGN_DATE, EVTYPE, FATALITIES:CROPDMGEXP)
+```
+
+The events in the database start in the year 1950 and end in November 2011. In the earlier years of the database there are generally fewer events recorded but more recent years should be considered more complete.
+
+Change BGN_DATE to a date variable and summarise it:
+
+```{r}
+stormdata$BGN_DATE <- as.Date(stormdata$BGN_DATE, "%m/%d/%Y %H:%M:%S")
+summary(stormdata$BGN_DATE)
+```
+
+Half of the observations are recorded between 18th March 2002 and 30th November 2011. Let's filter only those weather events that occurred between 2002 and 2011 since they give us more accurate picture of the current situation. 
+
+Filter data based on dates:
+
+```{r}
+stormdata <- stormdata %>%
+  filter(BGN_DATE >= "2002-01-01")
+```
+
+```{r}
+dim(stormdata)
+```
+
+The new data frame stormdata consists of 453730 observations and 8 variables.
+
+### Tidying EVTYPE variable
+
+There are 121 different types of events. However, some events are recorded differently even though they clearly describe same phenomenon (e.g. "thunderstorm" and "TSTM"). In addition some events can be combined because they are closely related (e.g. freeze, sleet and snow). Broader categories will work fine for the purpose of this assignment.
+
+Simplify EVTYPE categories:
+
+```{r}
+stormdata$EVTYPE[grepl("COASTAL", stormdata$EVTYPE)] <- "COASTAL FLOOD"
+stormdata$EVTYPE[grepl("VOLCANIC", stormdata$EVTYPE)] <- "VOLCANIC ASH"
+stormdata$EVTYPE[grepl("FIRE", stormdata$EVTYPE)] <- "FIRE"
+stormdata$EVTYPE[grepl("WINTER|WINTRY", stormdata$EVTYPE)] <- "WINTER WEATHER"
+stormdata$EVTYPE[grepl("THUNDERSTORM|TSTM", stormdata$EVTYPE)] <- "THUNDERSTORM"
+stormdata$EVTYPE[grepl("COLD|COOL", stormdata$EVTYPE)] <- "COLD"
+stormdata$EVTYPE[grepl("WIND|MICROBURST", stormdata$EVTYPE)] <- "WIND"
+stormdata$EVTYPE[grepl("SNOW|FROST|FREEZE|FREEZING|ICE|ICY|SLEET", stormdata$EVTYPE)] <- "SNOW AND ICE"
+stormdata$EVTYPE[grepl("HURRICANE", stormdata$EVTYPE)] <- "HURRICANE"
+stormdata$EVTYPE[grepl("SURF", stormdata$EVTYPE)] <- "SURF"
+stormdata$EVTYPE[grepl("HEAT|WARM", stormdata$EVTYPE)] <- "HEAT"
+stormdata$EVTYPE[grepl("DUST", stormdata$EVTYPE)] <- "DUST"
+stormdata$EVTYPE[grepl("SURGE", stormdata$EVTYPE)] <- "STORM SURGE"
+stormdata$EVTYPE[grepl("TORNADO", stormdata$EVTYPE)] <- "TORNADO"
+stormdata$EVTYPE[grepl("HAIL", stormdata$EVTYPE)] <- "HAIL"
+stormdata$EVTYPE[grepl("TROPICAL", stormdata$EVTYPE)] <- "TROPICAL STORM"
+stormdata$EVTYPE[grepl("RIP", stormdata$EVTYPE)] <- "RIP CURRENT"
+stormdata$EVTYPE[grepl("FOG", stormdata$EVTYPE)] <- "FOG"
+stormdata$EVTYPE[grepl("DROUGHT|DRY", stormdata$EVTYPE)] <- "DROUGHT"
+stormdata$EVTYPE[grepl("PRECIPTION", stormdata$EVTYPE)] <- "PRECIPTION"
+stormdata$EVTYPE[grepl("FLOOD", stormdata$EVTYPE)] <- "FLOOD"
+
+View(table(stormdata$EVTYPE))
+```
+
+Now there are 40 different type of events.
+
+### Property and crop damage calculation
+
+Real property/crop damage is PROPDMG multiplied by PROPDMGEXP / CROPDMG multiplied by ROPDMGEXP.
+
+```{r}
+table(stormdata$PROPDMGEXP)
+table(stormdata$CROPDMGEXP)
+```
+
+B stands for billion, M for million and K for thousand. Other cells are given a default value 1.
+
+Calculate property and crop damage:
+
+```{r}
+options(scipen=999) # removes scientific notations
+
+stormdata$PROPDMGEXP <- recode(stormdata$PROPDMGEXP, "K" = 1000, "M" = 1000000, "B" = 1000000000, .default = 1)
+stormdata$CROPDMGEXP <- recode(stormdata$CROPDMGEXP, "K" = 1000, "M" = 1000000, "B" = 1000000000, .default = 1)
+stormdata$PROPDMGREAL <- stormdata$PROPDMG*stormdata$PROPDMGEXP
+stormdata$CROPDMGREAL <- stormdata$CROPDMG*stormdata$CROPDMGEXP
+
+head(stormdata)
+```
+
+Two new variables are added to the data frame: PROPDMGREAL and CROPDMGREAL. These will be needed when generating plots.
+
+
+## 3 Results
+
+This sections answers the following questions:  
+- Across the United States, which types of events are most harmful with respect to population health?  
+- Across the United States, which types of events have the greatest economic consequences? 
+
+### The most harmful weather events with respect to population health
+
+Calculate the total number of fatalities and injuries caused by each event type and filter the TOP 10 most harmful weather events:
+
+```{r}
+harmful_events <- stormdata %>%
+  group_by(EVTYPE) %>%
+  summarize(FATALITIES = sum(FATALITIES), INJURIES = sum(INJURIES)) %>%
+  arrange(desc(FATALITIES+INJURIES)) %>%
+  slice(1:10) %>%
+  gather(key = "type", value = "count", c(FATALITIES, INJURIES))
+
+head(harmful_events, 20)
+```
+
+Plot the most harmful weather events:
+
+```{r harmful_events}
+ggplot(harmful_events, aes(x=reorder(EVTYPE, -count), y = count, fill = type)) + 
+  geom_bar(stat = "identity") +
+  labs(title = "TOP 10 most harmful weather events in the US (2002-2011)", x = "type of event") +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1))
+```
+
+The above barchart illustrates that tornadoes, heat and thunderstorms were the most harmful weather event with respect to population health in the US between 2002 and 2011. Tornadoes caused more than 1100 deaths and almost 13600 injuries.
+
+### The most severe weather events with the greatest economic consequences
+
+Calculate the total property and crop damage caused by each event type and filter the TOP 10 costliest weather events:
+
+```{r}
+costly_events <- stormdata %>%
+  group_by(EVTYPE) %>%
+  summarize(PROPDMGREAL = sum(PROPDMGREAL), CROPDMGREAL = sum(CROPDMGREAL)) %>%
+  arrange(desc(PROPDMGREAL+CROPDMGREAL)) %>%
+  slice(1:10) %>%
+  gather(key = "damage_type", value = "cost", c(PROPDMGREAL, CROPDMGREAL))
+
+head(costly_events, 20)
+```
+
+Plot the costliest weather events:
+
+```{r costly_events}
+ggplot(costly_events, aes(x=reorder(EVTYPE, -cost), y = cost/10^9, fill = damage_type)) + 
+  geom_bar(stat = "identity") +
+  labs(title = "TOP 10 costliest weather events in the US (2002-2011)",
+       x = "type of event", y = "cost in billion dollars") +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1)) +
+  scale_fill_discrete(name = "economic consequences", labels = c("crop damage", "property damage"))
+```
+
+The above barchart illustrates that floods, hurricanes and storm surges had the greatest economic consequences in the US between 2002 and 2011. Floods alone caused almost 150 billion dollars' worth of damage.
+
+
